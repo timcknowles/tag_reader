@@ -10,20 +10,58 @@ require "serialport"
 
 #sp = SerialPort.new(ARGV[0].to_i, ARGV[1].to_i, ARGV[2].to_i, ARGV[3].to_i, SerialPort::NONE)
 
-foobar = [] 
+rails generate resource person name:string rfid_code:string 
 
-open("/dev/tty.usbmodemfa121", "r+") do |tty|
-  tty.sync = true
-  Thread.new {
+# serial_number_monitor.rb
+class SerialNumberMonitor
+
+  def initialize
+    current_serial_number = []
+    max_length = 10
     while true do
-      p "hey"
-      tty.printf("%c", sp.getc)
+      open("/dev/tty.usbmodemfa121", "r+") do |tty|
+        tty.sync = true
+        #Thread.new {
+        #  while true do
+        #    p "hey"
+        #    tty.printf("%c", sp.getc)
+        #  end
+        #}
+        while (l = tty.gets) do
+          current_serial_number << l.strip
+
+          if current_serial_number.length == max_length
+            Thread.new { check_serial_number(current_serial_number) }
+            current_serial_number = []
+          end
+        end
+      end
     end
-  }
-  while (l = tty.gets) do
-    foobar << l.strip
+  end
+
+  def check_serial_number(code)
+
+    if person = Person.find_by_rdif_code(code)
+      person.visited!
+      Door.open
+      Door.play_nice_entry_tune
+    else
+      Door.growl
+    end
   end
 end
 
-foobar = foobar.join("")
-p foobar
+# person.rb
+require 'active_record'
+class Person < ActiveRecord::Base
+
+  has_many :visits
+
+  def visited!
+    vists.create!
+  end
+end
+
+# Gemfile
+source 'http://rubygems.org'
+gem 'active_record'
