@@ -1,67 +1,53 @@
+
 require 'rubygems'
 require "serialport"
 
-#if ARGV.size < 4
-#  STDERR.print <<-EOF
-#Usage: ruby #{$0} num_port bps nbits stopb
-#  EOF
-#  exit(1)
-#end
-
-#sp = SerialPort.new(ARGV[0].to_i, ARGV[1].to_i, ARGV[2].to_i, ARGV[3].to_i, SerialPort::NONE)
-
-rails generate resource person name:string rfid_code:string 
-
-# serial_number_monitor.rb
 class SerialNumberMonitor
-
   def initialize
-    current_serial_number = []
-    max_length = 10
-    while true do
-      open("/dev/tty.usbmodemfa121", "r+") do |tty|
-        tty.sync = true
-        #Thread.new {
-        #  while true do
-        #    p "hey"
-        #    tty.printf("%c", sp.getc)
-        #  end
-        #}
-        while (l = tty.gets) do
-          current_serial_number << l.strip
+    setup_serial_port
+    monitor_port
+  end
 
-          if current_serial_number.length == max_length
-            Thread.new { check_serial_number(current_serial_number) }
-            current_serial_number = []
+  private
+
+    def setup_serial_port
+      port_str = "/dev/tty.usbmodemfd121"
+      baud_rate = 9600
+      data_bits = 8
+      stop_bits = 1
+      parity = SerialPort::NONE
+       
+      @sp = SerialPort.new(port_str, baud_rate, data_bits, stop_bits, parity)
+    end
+
+    def monitor_port
+      @current_serial_number = []
+      open("/dev/tty.usbmodemfd121", "r+") do |tty|
+        tty.sync = true
+        while true do
+          if byte = tty.gets
+            process_byte(byte.strip.to_i)
           end
         end
       end
-    end
-  end
 
-  def check_serial_number(code)
-
-    if person = Person.find_by_rdif_code(code)
-      person.visited!
-      Door.open
-      Door.play_nice_entry_tune
-    else
-      Door.growl
+      sp.close
     end
-  end
+
+    def process_byte(byte)
+      @current_serial_number = [] if byte == 2
+      @current_serial_number << byte
+      code_complete if byte == 3
+    end
+
+    def code_complete
+      code = @current_serial_number.join("")
+      Thread.new do
+        url = "http://localhost:3000/visits.json?"
+        system "curl #{url} -d 'visit[rfid]=#{code}'"
+      end
+      @current_serial_number = []
+    end
 end
 
-# person.rb
-require 'active_record'
-class Person < ActiveRecord::Base
-
-  has_many :visits
-
-  def visited!
-    vists.create!
-  end
-end
-
-# Gemfile
-source 'http://rubygems.org'
-gem 'active_record'
+SerialNumberMonitor.new
